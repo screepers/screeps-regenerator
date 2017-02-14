@@ -37,10 +37,10 @@ module.exports = exports;
 // To include the runtime globally in the current node process, call
 // require("regenerator").runtime().
 function runtime() {
-  regeneratorRuntime = require("regenerator-runtime");
+  regeneratorRuntime = require("screeps-regenerator-runtime");
 }
 exports.runtime = runtime;
-runtime.path = require("regenerator-runtime/path.js").path;
+runtime.path = require("screeps-regenerator-runtime/path.js").path;
 
 var cachedRuntimeCode;
 function getRuntimeCode() {
@@ -49,7 +49,7 @@ function getRuntimeCode() {
 }
 
 var transformOptions = {
-  presets: [require("regenerator-preset")],
+  presets: [require("screeps-regenerator-preset")],
   parserOpts: {
     sourceType: "module",
     allowImportExportEverywhere: true,

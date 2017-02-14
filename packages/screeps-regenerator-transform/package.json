@@ -1,5 +1,5 @@
 {
-  "name": "regenerator-transform",
+  "name": "screeps-regenerator-transform",
   "author": "Ben Newman <bn@cs.stanford.edu>",
   "description": "Explode async and generator functions into a state machine.",
   "version": "0.9.8",

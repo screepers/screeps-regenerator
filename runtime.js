@@ -1,6 +1,6 @@
 console.warn(
-  "The regenerator/runtime module is deprecated; " +
-    "please import regenerator-runtime/runtime instead."
+  "The screeps-regenerator/runtime module is deprecated; " +
+    "please import screeps-regenerator-runtime/runtime instead."
 );
 
-module.exports = require("regenerator-runtime/runtime");
+module.exports = require("screeps-regenerator-runtime/runtime");

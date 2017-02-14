@@ -1,5 +1,5 @@
 {
-  "name": "regenerator-runtime",
+  "name": "screeps-regenerator-runtime",
   "author": "Ben Newman <bn@cs.stanford.edu>",
   "description": "Runtime for Regenerator-compiled generator and async functions.",
   "version": "0.10.1",

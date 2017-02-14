@@ -1,1 +1,1 @@
-module.exports = require("regenerator-runtime/runtime.js");
+module.exports = require("screeps-regenerator-runtime/runtime.js");
