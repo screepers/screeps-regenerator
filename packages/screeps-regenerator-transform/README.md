@@ -1,11 +1,11 @@
-# regenerator-transform
+# screeps-regenerator-transform
 
-Transform async/generator functions with [regenerator](https://github.com/facebook/regenerator)
+Transform async/generator functions with [screeps-regenerator](https://github.com/screepers/screeps-regenerator)
 
 ## Installation
 
 ```sh
-$ npm install regenerator-transform
+$ npm install screeps-regenerator-transform
 ```
 
 ## Usage
@@ -17,12 +17,12 @@ $ npm install regenerator-transform
 ```js
 // without options
 {
-  "plugins": ["regenerator-transform"]
+  "plugins": ["screeps-regenerator-transform"]
 }
 // with options
 {
   "plugins": [
-    ["regenerator-transform", {
+    ["screeps-regenerator-transform", {
       asyncGenerators: false, // true by default
       generators: false, // true by default
       async: false // true by default
@@ -34,13 +34,13 @@ $ npm install regenerator-transform
 ### Via CLI
 
 ```sh
-$ babel --plugins regenerator-transform script.js
+$ babel --plugins screeps-regenerator-transform script.js
 ```
 
 ### Via Node API
 
 ```javascript
 require("babel-core").transform("code", {
-  plugins: ["regenerator-transform"]
+  plugins: ["screeps-regenerator-transform"]
 });
 ```

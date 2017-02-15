@@ -12,7 +12,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/facebook/regenerator/tree/master/packages/regenerator-runtime"
+    "url": "https://github.com/screepers/screeps-regenerator/tree/master/packages/screeps-regenerator-runtime"
   },
   "license": "MIT"
 }

@@ -5,6 +5,8 @@ This package implements a babel transformation that allows you to use
 generators/`yield` in the game [screeps](https://screeps.com/) to emulate
 synchronous, multithreaded programming.
 
+This project is based on [regenerator](https://github.com/facebook/regenerator), by Facebook.
+
 Status
 ---
 
@@ -74,10 +76,7 @@ require("babel-core").transform("code", {
 How can you get involved?
 ---
 
-The easiest way to get involved is to look for buggy examples using [the
-sandbox](http://facebook.github.io/regenerator/), and when you find
-something strange just click the "report a bug" link (the new issue form
-will be populated automatically with the problematic code).
-
-If you're feeling especially brave, you are more than welcome to dive into
-the runtime code and add new features yourself.
+The easiest way to get involved is to try out some scripts yourself and submit
+feature requests for what you'd like to be able to do. If you're feeling
+especially brave, you are more than welcome to dive into the runtime code and
+add new features yourself.

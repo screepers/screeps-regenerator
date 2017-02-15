@@ -17,10 +17,10 @@
     "ES6"
   ],
   "version": "0.9.5",
-  "homepage": "http://github.com/facebook/regenerator",
+  "homepage": "https://github.com/screepers/screeps-regenerator",
   "repository": {
     "type": "git",
-    "url": "git://github.com/facebook/regenerator.git"
+    "url": "git://github.com/screepers/screeps-regenerator.git"
   },
   "scripts": {
     "pretest": "./link.sh",
