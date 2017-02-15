@@ -16,8 +16,9 @@ import * as util from "./util";
 
 let hasOwn = Object.prototype.hasOwnProperty;
 
-function Emitter(contextId) {
+function Emitter(localsId, contextId) {
   assert.ok(this instanceof Emitter);
+  t.assertIdentifier(localsId);
   t.assertIdentifier(contextId);
 
   // Used to generate unique temporary names.
@@ -27,6 +28,7 @@ function Emitter(contextId) {
   // anything in the local scope, we might have to rename it, so we
   // refer to it symbolically instead of just assuming that it will be
   // called "context".
+  this.localsId = localsId;
   this.contextId = contextId;
 
   // An append-only list of Statements that grows each time this.emit is
@@ -199,7 +201,7 @@ Ep.makeTempVar = function() {
 Ep.getContextFunction = function(id) {
   return t.functionExpression(
     id || null/*Anonymous*/,
-    [this.contextId],
+    [this.localsId, this.contextId],
     t.blockStatement([this.getDispatchLoop()]),
     false, // Not a generator anymore!
     false // Nor an expression.

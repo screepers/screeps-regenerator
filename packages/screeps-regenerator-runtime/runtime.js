@@ -35,17 +35,50 @@
   // module.exports (if we're in a module) or a new, empty object.
   runtime = global.regeneratorRuntime = inModule ? module.exports : {};
 
-  function wrap(innerFn, outerFn, self, tryLocsList) {
-    // If outerFn provided and outerFn.prototype is a Generator, then outerFn.prototype instanceof Generator.
-    var protoGenerator = outerFn && outerFn.prototype instanceof Generator ? outerFn : Generator;
-    var generator = Object.create(protoGenerator.prototype);
-    var context = new Context(tryLocsList || []);
+  // Keep a registry of all known generator functions so we can restore them in
+  // the future. This is possible because we throw an error if generators are
+  // declared anywhere other than the toplevel scope.
+  var allGenerators = {};
 
-    // The ._invoke method unifies the implementations of the .next,
-    // .throw, and .return methods.
-    generator._invoke = makeInvokeMethod(innerFn, self, context);
+  function wrap(innerFn, hash, argNames, argumentsVariable, tryLocsList) {
+    var genFun = function() {
+      var locals = Object.create(null);
+      for (var i = argNames.length - 1; i >= 0; i--) {
+        locals[argNames[i]] = arguments[i];
+      }
+      if (argumentsVariable) {
+        locals[argumentsVariable] = arguments;
+      }
 
-    return generator;
+      var generator = Object.create(genFun.prototype);
+      generator._context = new Context(genFun._hash, locals, tryLocsList || []);
+
+      // The ._invoke method unifies the implementations of the .next,
+      // .throw, and .return methods.
+      generator._invoke = makeInvokeMethod(innerFn, this);
+
+      return generator;
+    };
+
+    if (Object.setPrototypeOf) {
+      Object.setPrototypeOf(genFun, GeneratorFunction.prototype);
+    } else {
+      genFun.__proto__ = GeneratorFunction.prototype;
+      if (!(toStringTagSymbol in genFun)) {
+        genFun[toStringTagSymbol] = "GeneratorFunction";
+      }
+    }
+    genFun.prototype = Object.create(Generator.prototype);
+    genFun.prototype.constructor = genFun;
+    genFun._hash = hash;
+    genFun._innerFn = innerFn;
+
+    if (allGenerators[hash]) {
+      throw new Error("Internal Error - duplicate hash");
+    }
+    allGenerators[hash] = genFun;
+
+    return genFun;
   }
   runtime.wrap = wrap;
 
@@ -59,18 +92,18 @@
   // in every case, so we don't have to touch the arguments object. The
   // only additional allocation required is the completion record, which
   // has a stable shape and so hopefully should be cheap to allocate.
-  function tryCatch(fn, obj, arg) {
+  function tryCatch(fn, obj, arg1, arg2) {
     try {
-      return { type: "normal", arg: fn.call(obj, arg) };
+      return { type: "normal", arg: fn.call(obj, arg1, arg2) };
     } catch (err) {
       return { type: "throw", arg: err };
     }
   }
 
-  var GenStateSuspendedStart = "suspendedStart";
-  var GenStateSuspendedYield = "suspendedYield";
-  var GenStateExecuting = "executing";
-  var GenStateCompleted = "completed";
+  var GenStateSuspendedStart = "s";
+  var GenStateSuspendedYield = "y";
+  var GenStateExecuting = "x";
+  var GenStateCompleted = "c";
 
   // Returning this object from the innerFn has the same effect as
   // breaking out of the dispatch switch statement.
@@ -126,19 +159,6 @@
         // do is to check its .name property.
         (ctor.displayName || ctor.name) === "GeneratorFunction"
       : false;
-  };
-
-  runtime.mark = function(genFun) {
-    if (Object.setPrototypeOf) {
-      Object.setPrototypeOf(genFun, GeneratorFunctionPrototype);
-    } else {
-      genFun.__proto__ = GeneratorFunctionPrototype;
-      if (!(toStringTagSymbol in genFun)) {
-        genFun[toStringTagSymbol] = "GeneratorFunction";
-      }
-    }
-    genFun.prototype = Object.create(Gp);
-    return genFun;
   };
 
   // Within the body of any async function, `await x` is transformed to
@@ -246,15 +266,13 @@
         });
   };
 
-  function makeInvokeMethod(innerFn, self, context) {
-    var state = GenStateSuspendedStart;
-
+  function makeInvokeMethod(innerFn, self) {
     return function invoke(method, arg) {
-      if (state === GenStateExecuting) {
+      if (this._context.state === GenStateExecuting) {
         throw new Error("Generator is already running");
       }
 
-      if (state === GenStateCompleted) {
+      if (this._context.state === GenStateCompleted) {
         if (method === "throw") {
           throw arg;
         }
@@ -265,13 +283,13 @@
       }
 
       while (true) {
-        var delegate = context.delegate;
+        var delegate = this._context.delegate;
         if (delegate) {
           if (method === "return" ||
               (method === "throw" && delegate.iterator[method] === undefined)) {
             // A return or throw (when the delegate iterator has no throw
             // method) always terminates the yield* loop.
-            context.delegate = null;
+            this._context.delegate = null;
 
             // If the delegate iterator has a return method, give it a
             // chance to clean up.
@@ -301,7 +319,7 @@
           );
 
           if (record.type === "throw") {
-            context.delegate = null;
+            this._context.delegate = null;
 
             // Like returning generator.throw(uncaught), but without the
             // overhead of an extra function call.
@@ -318,28 +336,28 @@
 
           var info = record.arg;
           if (info.done) {
-            context[delegate.resultName] = info.value;
-            context.next = delegate.nextLoc;
+            this._context[delegate.resultName] = info.value;
+            this._context.next = delegate.nextLoc;
           } else {
-            state = GenStateSuspendedYield;
+            this._context.state = GenStateSuspendedYield;
             return info;
           }
 
-          context.delegate = null;
+          this._context.delegate = null;
         }
 
         if (method === "next") {
           // Setting context._sent for legacy support of Babel's
           // function.sent implementation.
-          context.sent = context._sent = arg;
+          this._context.sent = this._context._sent = arg;
 
         } else if (method === "throw") {
-          if (state === GenStateSuspendedStart) {
-            state = GenStateCompleted;
+          if (this._context.state === GenStateSuspendedStart) {
+            this._context.state = GenStateCompleted;
             throw arg;
           }
 
-          if (context.dispatchException(arg)) {
+          if (this._context.dispatchException(arg)) {
             // If the dispatched exception was caught by a catch block,
             // then let that catch block handle the exception normally.
             method = "next";
@@ -347,26 +365,26 @@
           }
 
         } else if (method === "return") {
-          context.abrupt("return", arg);
+          this._context.abrupt("return", arg);
         }
 
-        state = GenStateExecuting;
+        this._context.state = GenStateExecuting;
 
-        var record = tryCatch(innerFn, self, context);
+        var record = tryCatch(innerFn, self, this._context.locals, this._context);
         if (record.type === "normal") {
           // If an exception is thrown from innerFn, we leave state ===
           // GenStateExecuting and loop back for another invocation.
-          state = context.done
+          this._context.state = this._context.done
             ? GenStateCompleted
             : GenStateSuspendedYield;
 
           var info = {
             value: record.arg,
-            done: context.done
+            done: this._context.done
           };
 
           if (record.arg === ContinueSentinel) {
-            if (context.delegate && method === "next") {
+            if (this._context.delegate && method === "next") {
               // Deliberately forget the last sent value so that we don't
               // accidentally pass it on to the delegate.
               arg = undefined;
@@ -376,7 +394,7 @@
           }
 
         } else if (record.type === "throw") {
-          state = GenStateCompleted;
+          this._context.state = GenStateCompleted;
           // Dispatch the exception by looping back around to the
           // context.dispatchException(arg) call above.
           method = "throw";
@@ -418,13 +436,25 @@
     entry.completion = record;
   }
 
-  function Context(tryLocsList) {
+  function Context(genHash, locals, tryLocsList) {
+    this.gen = genHash;
+    this.locals = locals;
     // The root entry object (effectively a try statement without a catch
     // or a finally block) gives us a place to store values thrown from
     // locations where there is no enclosing try statement.
     this.tryEntries = [{ tryLoc: "root" }];
     tryLocsList.forEach(pushTryEntry, this);
-    this.reset(true);
+
+    this.prev = 0;
+    this.next = 0;
+    // Resetting context._sent for legacy support of Babel's
+    // function.sent implementation.
+    this.sent = this._sent = undefined;
+    this.done = false;
+    this.delegate = null;
+    this.state = GenStateSuspendedStart;
+
+    this.tryEntries.forEach(resetTryEntry);
   }
 
   runtime.keys = function(object) {
@@ -497,27 +527,7 @@
   Context.prototype = {
     constructor: Context,
 
-    reset: function(skipTempReset) {
-      this.prev = 0;
-      this.next = 0;
-      // Resetting context._sent for legacy support of Babel's
-      // function.sent implementation.
-      this.sent = this._sent = undefined;
-      this.done = false;
-      this.delegate = null;
-
-      this.tryEntries.forEach(resetTryEntry);
-
-      if (!skipTempReset) {
-        for (var name in this) {
-          // Not sure about the optimal order of these conditions:
-          if (name.charAt(0) === "t" &&
-              hasOwn.call(this, name) &&
-              !isNaN(+name.slice(1))) {
-            this[name] = undefined;
-          }
-        }
-      }
+    reset: function() {
     },
 
     stop: function() {
@@ -672,6 +682,20 @@
 
       return ContinueSentinel;
     }
+  };
+
+  runtime.serialize = function(gen) {
+    return JSON.stringify(gen._context);
+  };
+
+  runtime.deserialize = function(data) {
+    data = JSON.parse(data);
+
+    var genFun = allGenerators[data.gen];
+    var generator = Object.create(genFun.prototype);
+    generator._context = Object.assign(Object.create(Context.prototype), data);
+    generator._invoke = makeInvokeMethod(genFun._innerFn, this);
+    return generator;
   };
 })(
   // Among the various tricks for obtaining a reference to the global

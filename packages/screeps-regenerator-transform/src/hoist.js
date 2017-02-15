@@ -12,9 +12,7 @@ import * as t from "babel-types";
 let hasOwn = Object.prototype.hasOwnProperty;
 
 // The hoist function takes a FunctionExpression or FunctionDeclaration
-// and replaces any Declaration nodes in its body with assignments, then
-// returns a VariableDeclaration containing just the names of the removed
-// declarations.
+// and replaces any Declaration nodes in its body with property assignments.
 exports.hoist = function(funPath) {
   t.assertFunction(funPath.node);
 
@@ -122,29 +120,4 @@ exports.hoist = function(funPath) {
       path.skip();
     }
   });
-
-  let paramNames = {};
-  funPath.get("params").forEach(function(paramPath) {
-    let param = paramPath.node;
-    if (t.isIdentifier(param)) {
-      paramNames[param.name] = param;
-    } else {
-      // Variables declared by destructuring parameter patterns will be
-      // harmlessly re-declared.
-    }
-  });
-
-  let declarations = [];
-
-  Object.keys(vars).forEach(function(name) {
-    if (!hasOwn.call(paramNames, name)) {
-      declarations.push(t.variableDeclarator(vars[name], null));
-    }
-  });
-
-  if (declarations.length === 0) {
-    return null; // Be sure to handle this case!
-  }
-
-  return t.variableDeclaration("var", declarations);
 };

@@ -11,6 +11,7 @@
 import assert from "assert";
 import * as t from "babel-types";
 import { hoist } from "./hoist";
+import { locals } from "./locals";
 import { Emitter } from "./emit";
 import * as util from "./util";
 
@@ -37,8 +38,29 @@ exports.visitor = {
         return;
       }
 
+      if (node.async) {
+        throw path.buildCodeFrameError("Async functions not supported");
+      }
+
+      let localsId = path.scope.generateUidIdentifier("locals");
       let contextId = path.scope.generateUidIdentifier("context");
       let argsId = path.scope.generateUidIdentifier("args");
+
+      if (t.isFunctionDeclaration(node)) {
+        let pp = path.findParent(function (path) {
+          return path.isProgram() || path.isFunction();
+        });
+        if (!pp.isProgram()) {
+          throw path.buildCodeFrameError("Generators must be declared at the top level");
+        }
+
+        pp.scope.push({ id: node.id });
+        let funExpr = t.functionExpression(node.id, node.params, node.body, node.generator, node.async);
+        path.replaceWith(t.assignmentExpression('=', node.id, funExpr));
+        if (path.isStatement()) path = path.get('expression');
+        path = path.get('right');
+        node = funExpr;
+      }
 
       path.ensureBlock();
       let bodyBlockPath = path.get("body");
@@ -77,39 +99,37 @@ exports.visitor = {
         bodyBlockPath.node.body = innerBody;
       }
 
-      let outerFnExpr = getOuterFnExpr(path);
-      // Note that getOuterFnExpr has the side-effect of ensuring that the
-      // function has a name (so node.id will always be an Identifier), even
-      // if a temporary name has to be synthesized.
-      t.assertIdentifier(node.id);
-      let innerFnId = t.identifier(node.id.name + "$");
-
       // Turn all declarations into vars, and replace the original
       // declarations with equivalent assignment expressions.
-      let vars = hoist(path);
+      hoist(path);
 
       let didRenameArguments = renameArguments(path, argsId);
       if (didRenameArguments) {
-        vars = vars || t.variableDeclaration("var", []);
-        vars.declarations.push(t.variableDeclarator(
-          argsId, t.identifier("arguments")
-        ));
+        path.scope.push({ id: argsId });
       }
 
-      let emitter = new Emitter(contextId);
+      locals(path, localsId);
+
+      let emitter = new Emitter(localsId, contextId);
       emitter.explode(path.get("body"));
 
-      if (vars && vars.declarations.length > 0) {
-        outerBody.push(vars);
-      }
+      let innerFnId = path.scope.generateUidIdentifierBasedOnNode(node.id);
+
+      // XXX - this should be an actual hash of the compiled function body
+      let hash = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER).toString(16);
+
+      let params = t.arrayExpression([]);
+      path.get("params").forEach(function(paramPath) {
+        let param = paramPath.node;
+        t.assertIdentifier(param);
+        params.elements.push(t.stringLiteral(param.name));
+      });
 
       let wrapArgs = [
         emitter.getContextFunction(innerFnId),
-        // Async functions that are not generators don't care about the
-        // outer function because they don't need it to be marked and don't
-        // inherit from its .prototype.
-        node.generator ? outerFnExpr : t.nullLiteral(),
-        t.thisExpression()
+        t.stringLiteral(hash),
+        params,
+        didRenameArguments ? argsId : t.nullLiteral()
       ];
 
       let tryLocsList = emitter.getTryLocsList();
@@ -121,9 +141,6 @@ exports.visitor = {
         util.runtimeProperty(node.async ? "async" : "wrap"),
         wrapArgs
       );
-
-      outerBody.push(t.returnStatement(wrapCall));
-      node.body = t.blockStatement(outerBody);
 
       const oldDirectives = bodyBlockPath.node.directives;
       if (oldDirectives) {
@@ -141,9 +158,7 @@ exports.visitor = {
         node.async = false;
       }
 
-      if (wasGeneratorFunction && t.isExpression(node)) {
-        path.replaceWith(t.callExpression(util.runtimeProperty("mark"), [node]));
-      }
+      path.replaceWith(wrapCall);
 
       // Generators are processed in 'exit' handlers so that regenerator only has to run on
       // an ES5 AST, but that means traversal will not pick up newly inserted references
@@ -167,30 +182,6 @@ function getOuterFnExpr(funPath) {
     node.id = funPath.scope.parent.generateUidIdentifier("callee");
   }
 
-  if (node.generator && // Non-generator functions don't need to be marked.
-      t.isFunctionDeclaration(node)) {
-    let pp = funPath.findParent(function (path) {
-      return path.isProgram() || path.isBlockStatement();
-    });
-
-    if (!pp) {
-      return node.id;
-    }
-
-    let markDecl = getRuntimeMarkDecl(pp);
-    let markedArray = markDecl.declarations[0].id;
-    let funDeclIdArray = markDecl.declarations[0].init.callee.object;
-    t.assertArrayExpression(funDeclIdArray);
-
-    let index = funDeclIdArray.elements.length;
-    funDeclIdArray.elements.push(node.id);
-
-    return t.memberExpression(
-      markedArray,
-      t.numericLiteral(index),
-      true
-    );
-  }
 
   return node.id;
 }
