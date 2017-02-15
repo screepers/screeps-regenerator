@@ -1,27 +1,48 @@
-regenerator [![Build Status](https://travis-ci.org/facebook/regenerator.svg?branch=master)](https://travis-ci.org/facebook/regenerator)
+screeps-regenerator
 ===
 
-This package implements a fully-functional source transformation that
-takes the syntax for generators/`yield` from [ECMAScript 2015 or ES2015](http://www.ecma-international.org/ecma-262/6.0/) and [Asynchronous Iteration](https://github.com/tc39/proposal-async-iteration) proposal and
-spits out efficient JS-of-today (ES5) that behaves the same way.
+This package implements a babel transformation that allows you to use
+generators/`yield` in the game [screeps](https://screeps.com/) to emulate
+synchronous, multithreaded programming.
 
-A small runtime library (less than 1KB compressed) is required to provide the
-`wrapGenerator` function. You can install it either as a CommonJS module
-or as a standalone .js file, whichever you prefer.
+Status
+---
+
+This project is currently just a proof-of-concept. There is very little error
+checking and few convenience methods. Follow the project to see future
+development.
+
+The eventual vision is to be able to do something like this. Note: none of this currently works, it's just for inspiration.
+
+```js
+function* harvester() {
+  let spawn = Game.spawns.Spawn1;
+  let creep = yield spawn.createCreep([MOVE, WORK, CARRY]);
+  let source = creep.room.find(FIND_SOURCES)[0];
+  while (creep.ticksToLive > 0) {
+    yield creep.moveTo(source.pos);
+    while (_.sum(creep.carry) < creep.carryCapacity) {
+      yield creep.harvest(source);
+    }
+    yield creep.moveTo(spawn.pos);
+    yield creep.transfer(spawn, RESOURCE_ENERGY);
+  }
+}
+```
 
 Installation
 ---
 
 From NPM:
 ```sh
-npm install -g regenerator
+npm install --save-dev screeps-regenerator-preset screeps-regenerator-runtime
 ```
 
 From GitHub:
 ```sh
 cd path/to/node_modules
 git clone git://github.com/facebook/regenerator.git
-cd regenerator
+cd screeps-regenerator
 npm install .
 npm test
 ```
@@ -31,27 +52,23 @@ Usage
 
 You have several options for using this module.
 
-Simplest usage:
+Via .babelrc (Recommended)
+```js
+{
+  "presets": ["screeps-regenerator-preset"]
+}
+```
+
+Via CLI:
 ```sh
-regenerator es6.js > es5.js # Just the transform.
-regenerator --include-runtime es6.js > es5.js # Add the runtime too.
-regenerator src lib # Transform every .js file in src and output to lib.
+babel --preset screeps-regenerator-prefix script.js
 ```
 
-Programmatic usage:
+Via Node API:
 ```js
-var es5Source = require("regenerator").compile(es6Source).code;
-var es5SourceWithRuntime = require("regenerator").compile(es6Source, {
-  includeRuntime: true
-}).code;
-```
-
-AST transformation:
-```js
-var recast = require("recast");
-var ast = recast.parse(es6Source);
-ast = require("regenerator").transform(ast);
-var es5Source = recast.print(ast);
+require("babel-core").transform("code", {
+  presets: ["screeps-regenerator-preset"]
+});
 ```
 
 How can you get involved?
@@ -62,12 +79,5 @@ sandbox](http://facebook.github.io/regenerator/), and when you find
 something strange just click the "report a bug" link (the new issue form
 will be populated automatically with the problematic code).
 
-Alternatively, you can
-[fork](https://github.com/facebook/regenerator/fork) the repository,
-create some failing tests cases in [test/tests.es6.js](test/tests.es6.js),
-and send pull requests for me to fix.
-
 If you're feeling especially brave, you are more than welcome to dive into
-the transformer code and fix the bug(s) yourself, but I must warn you that
-the code could really benefit from [better implementation
-comments](https://github.com/facebook/regenerator/issues/7).
+the runtime code and add new features yourself.

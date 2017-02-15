@@ -1,6 +1,6 @@
 {
   "name": "screeps-regenerator-runtime",
-  "author": "Ben Newman <bn@cs.stanford.edu>",
+  "author": "Ryan Patterson <ry@cgamesplay.com>",
   "description": "Runtime for Regenerator-compiled generator and async functions.",
   "version": "0.10.1",
   "main": "runtime-module.js",

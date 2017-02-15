@@ -1,6 +1,6 @@
 {
   "name": "screeps-regenerator-preset",
-  "author": "Ben Newman <bn@cs.stanford.edu>",
+  "author": "Ryan Patterson <ry@cgamesplay.com>",
   "description": "Babel preset for easy use of screeps-regenerator-transform.",
   "version": "0.9.6",
   "main": "index.js",

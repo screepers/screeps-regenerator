@@ -1,6 +1,6 @@
 {
   "name": "screeps-regenerator-transform",
-  "author": "Ben Newman <bn@cs.stanford.edu>",
+  "author": "Ryan Patterson <ry@cgamesplay.com>",
   "description": "Explode async and generator functions into a state machine.",
   "version": "0.9.8",
   "main": "lib/index.js",
