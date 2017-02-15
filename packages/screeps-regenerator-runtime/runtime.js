@@ -40,7 +40,7 @@
   // declared anywhere other than the toplevel scope.
   var allGenerators = {};
 
-  function wrap(innerFn, hash, argNames, argumentsVariable, tryLocsList) {
+  function wrapGenerator(innerFn, hash, argNames, argumentsVariable, tryLocsList) {
     var genFun = function() {
       var locals = Object.create(null);
       for (var i = argNames.length - 1; i >= 0; i--) {
@@ -80,7 +80,7 @@
 
     return genFun;
   }
-  runtime.wrap = wrap;
+  runtime.wrapGenerator = wrapGenerator;
 
   // Try/catch helper to minimize deoptimizations. Returns a completion
   // record like context.tryEntries[i].completion. This interface could
@@ -256,7 +256,7 @@
   // the final result produced by the iterator.
   runtime.async = function(innerFn, outerFn, self, tryLocsList) {
     var iter = new AsyncIterator(
-      wrap(innerFn, outerFn, self, tryLocsList)
+      wrapGenerator(innerFn, outerFn, self, tryLocsList)
     );
 
     return runtime.isGeneratorFunction(outerFn)
@@ -677,25 +677,42 @@
       this.delegate = {
         iterator: values(iterable),
         resultName: resultName,
-        nextLoc: nextLoc
+        nextLoc: nextLoc,
+        toJSON: function() {
+          return { i: this.iterator._context, r: this.resultName, n: this.nextLoc };
+        }
       };
 
       return ContinueSentinel;
-    }
+    },
+
+    revive: function(data) {
+      Object.assign(this, data);
+      if (this.delegate) {
+        let iterable = reviveContext(this.delegate.i);
+        this.delegateYield(iterable, this.delegate.r, this.delegate.n);
+      }
+    },
   };
 
   runtime.serialize = function(gen) {
     return JSON.stringify(gen._context);
   };
 
+  function reviveContext(data) {
+    var genFun = allGenerators[data.gen];
+    if (!genFun) throw new Error("Bad generator hash");
+    var generator = Object.create(genFun.prototype);
+    generator._context = Object.assign(Object.create(Context.prototype));
+    generator._context.revive(data);
+    generator._invoke = makeInvokeMethod(genFun._innerFn, this);
+
+    return generator;
+  }
+
   runtime.deserialize = function(data) {
     data = JSON.parse(data);
-
-    var genFun = allGenerators[data.gen];
-    var generator = Object.create(genFun.prototype);
-    generator._context = Object.assign(Object.create(Context.prototype), data);
-    generator._invoke = makeInvokeMethod(genFun._innerFn, this);
-    return generator;
+    return reviveContext(data);
   };
 })(
   // Among the various tricks for obtaining a reference to the global

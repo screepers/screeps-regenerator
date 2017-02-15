@@ -129,7 +129,7 @@ exports.visitor = {
         emitter.getContextFunction(innerFnId),
         t.stringLiteral(hash),
         params,
-        didRenameArguments ? argsId : t.nullLiteral()
+        didRenameArguments ? t.stringLiteral(argsId.name) : t.nullLiteral()
       ];
 
       let tryLocsList = emitter.getTryLocsList();
@@ -138,7 +138,7 @@ exports.visitor = {
       }
 
       let wrapCall = t.callExpression(
-        util.runtimeProperty(node.async ? "async" : "wrap"),
+        util.runtimeProperty(node.async ? "async" : "wrapGenerator"),
         wrapArgs
       );
 
