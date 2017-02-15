@@ -14,6 +14,34 @@ This project is currently just a proof-of-concept. There is very little error
 checking and few convenience methods. Follow the project to see future
 development.
 
+The following currently works. It will count up to 10 and repeat over the course
+of 10 separate ticks.
+
+```js
+exports.loop = function () {
+  var thread;
+  if (Memory.thread) {
+    thread = regeneratorRuntime.deserialize(Memory.thread);
+    delete Memory.thread;
+  } else {
+    thread = main();
+  }
+  let result = thread.next();
+  if (!result.done) {
+    Memory.thread = regeneratorRuntime.serialize(thread);
+  }
+};
+
+function* main() {
+  console.log(Game.time, "Counting to 10");
+  for (var i = 0; i < 10; i++) {
+    console.log(Game.time, "...", i);
+    yield null;
+  }
+  console.log("Hooray!");
+}
+```
+
 The eventual vision is to be able to do something like this. Note: none of this currently works, it's just for inspiration.
 
 ```js
