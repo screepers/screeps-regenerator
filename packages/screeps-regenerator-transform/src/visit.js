@@ -42,25 +42,9 @@ exports.visitor = {
         throw path.buildCodeFrameError("Async functions not supported");
       }
 
-      let localsId = path.scope.generateUidIdentifier("locals");
       let contextId = path.scope.generateUidIdentifier("context");
+      let localsId = path.scope.generateUidIdentifier("locals");
       let argsId = path.scope.generateUidIdentifier("args");
-
-      if (t.isFunctionDeclaration(node)) {
-        let pp = path.findParent(function (path) {
-          return path.isProgram() || path.isFunction();
-        });
-        if (!pp.isProgram()) {
-          throw path.buildCodeFrameError("Generators must be declared at the top level");
-        }
-
-        pp.scope.push({ id: node.id });
-        let funExpr = t.functionExpression(node.id, node.params, node.body, node.generator, node.async);
-        path.replaceWith(t.assignmentExpression('=', node.id, funExpr));
-        if (path.isStatement()) path = path.get('expression');
-        path = path.get('right');
-        node = funExpr;
-      }
 
       path.ensureBlock();
       let bodyBlockPath = path.get("body");
@@ -99,37 +83,48 @@ exports.visitor = {
         bodyBlockPath.node.body = innerBody;
       }
 
-      // Turn all declarations into vars, and replace the original
-      // declarations with equivalent assignment expressions.
-      hoist(path);
+      var foundLocals = hoist(path);
 
       let didRenameArguments = renameArguments(path, argsId);
       if (didRenameArguments) {
         path.scope.push({ id: argsId });
+        foundLocals.push(argsId.name);
       }
-
-      locals(path, localsId);
 
       let emitter = new Emitter(localsId, contextId);
       emitter.explode(path.get("body"));
 
-      let innerFnId = path.scope.generateUidIdentifierBasedOnNode(node.id);
-
       // XXX - this should be an actual hash of the compiled function body
       let hash = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER).toString(16);
+
+      let outerFnExpr = getOuterFnExpr(path, hash, state.opts.allowNestedDeclarations);
+      // Note that getOuterFnExpr has the side-effect of ensuring that the
+      // function has a name (so node.id will always be an Identifier), even
+      // if a temporary name has to be synthesized.
+      t.assertIdentifier(node.id);
+      let innerFnId = t.identifier(node.id.name + "$");
 
       let params = t.arrayExpression([]);
       path.get("params").forEach(function(paramPath) {
         let param = paramPath.node;
         t.assertIdentifier(param);
+        if (param.name == "arguments" && didRenameArguments) {
+          // In this case we have to rename the actual parameter as well
+          param.name = argsId.name;
+        }
         params.elements.push(t.stringLiteral(param.name));
       });
 
       let wrapArgs = [
         emitter.getContextFunction(innerFnId),
-        t.stringLiteral(hash),
+        // Async functions that are not generators don't care about the
+        // outer function because they don't need it to be marked and don't
+        // inherit from its .prototype.
+        node.generator ? outerFnExpr : t.nullLiteral(),
         params,
-        didRenameArguments ? t.stringLiteral(argsId.name) : t.nullLiteral()
+        didRenameArguments ? t.stringLiteral(argsId.name) : t.nullLiteral(),
+        t.thisExpression(),
+        t.identifier("arguments"),
       ];
 
       let tryLocsList = emitter.getTryLocsList();
@@ -138,9 +133,15 @@ exports.visitor = {
       }
 
       let wrapCall = t.callExpression(
-        util.runtimeProperty(node.async ? "async" : "wrapGenerator"),
+        util.runtimeProperty(node.async ? "async" : "wrap"),
         wrapArgs
       );
+
+      outerBody.push(t.returnStatement(wrapCall));
+      node.body = t.blockStatement(outerBody);
+
+      let innerFnPath = path.get('body.body.' + (outerBody.length - 1) + '.argument.arguments.0');
+      locals(innerFnPath, localsId, contextId, foundLocals);
 
       const oldDirectives = bodyBlockPath.node.directives;
       if (oldDirectives) {
@@ -158,7 +159,12 @@ exports.visitor = {
         node.async = false;
       }
 
-      path.replaceWith(wrapCall);
+      if (wasGeneratorFunction && t.isExpression(node)) {
+        path.replaceWith(t.callExpression(util.runtimeProperty("mark"), [
+          node,
+          t.stringLiteral(hash)
+        ]));
+      }
 
       // Generators are processed in 'exit' handlers so that regenerator only has to run on
       // an ES5 AST, but that means traversal will not pick up newly inserted references
@@ -172,7 +178,7 @@ exports.visitor = {
 // used to refer reliably to the function object from inside the function.
 // This expression is essentially a replacement for arguments.callee, with
 // the key advantage that it works in strict mode.
-function getOuterFnExpr(funPath) {
+function getOuterFnExpr(funPath, hash, allowNested) {
   let node = funPath.node;
   t.assertFunction(node);
 
@@ -182,6 +188,37 @@ function getOuterFnExpr(funPath) {
     node.id = funPath.scope.parent.generateUidIdentifier("callee");
   }
 
+  if (node.generator && // Non-generator functions don't need to be marked.
+      t.isFunctionDeclaration(node)) {
+    let pp = funPath.findParent(function (path) {
+      return path.isProgram() || path.isBlockStatement();
+    });
+
+    if (!pp.isProgram() && !allowNested) {
+      throw funPath.buildCodeFrameError("Generators must be declared at the top level");
+    }
+
+    if (!pp) {
+      return node.id;
+    }
+
+    let markDecl = getRuntimeMarkDecl(pp);
+    let markedArray = markDecl.declarations[0].id;
+    let funDeclIdArray = markDecl.declarations[0].init.callee.object;
+    t.assertArrayExpression(funDeclIdArray);
+
+    let index = funDeclIdArray.elements.length;
+    funDeclIdArray.elements.push(t.arrayExpression([
+      node.id,
+      t.stringLiteral(hash),
+    ]));
+
+    return t.memberExpression(
+      markedArray,
+      t.numericLiteral(index),
+      true
+    );
+  }
 
   return node.id;
 }
@@ -203,8 +240,20 @@ function getRuntimeMarkDecl(blockPath) {
           t.arrayExpression([]),
           t.identifier("map"),
           false
-        ),
-        [util.runtimeProperty("mark")]
+        ), [
+          t.functionExpression(null,
+            [ t.identifier("arr") ],
+            t.blockStatement([
+              t.returnStatement(
+                t.callExpression(
+                  util.runtimeProperty("mark"), [
+                  t.memberExpression(t.identifier("arr"), t.numericLiteral(0), true),
+                  t.memberExpression(t.identifier("arr"), t.numericLiteral(1), true),
+                ])
+              )
+            ])
+          )
+        ]
       )
     )
   ]);

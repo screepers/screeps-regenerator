@@ -11,8 +11,9 @@
 import * as t from "babel-types";
 let hasOwn = Object.prototype.hasOwnProperty;
 
-// The hoist function takes a FunctionExpression or FunctionDeclaration
-// and replaces any Declaration nodes in its body with property assignments.
+// The hoist function takes a FunctionExpression or FunctionDeclaration and
+// replaces any Declaration nodes in its body with assignments, then returns the
+// list of replaced identifiers.
 exports.hoist = function(funPath) {
   t.assertFunction(funPath.node);
 
@@ -120,4 +121,6 @@ exports.hoist = function(funPath) {
       path.skip();
     }
   });
+
+  return Object.keys(vars);
 };

@@ -49,7 +49,7 @@ function getRuntimeCode() {
 }
 
 var transformOptions = {
-  presets: [require("screeps-regenerator-preset")],
+  presets: [ [ require("screeps-regenerator-preset"), { allowNestedDeclarations: true } ] ],
   parserOpts: {
     sourceType: "module",
     allowImportExportEverywhere: true,

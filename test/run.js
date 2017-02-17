@@ -102,10 +102,10 @@ enqueue(convert, [
   "./test/non-native.es5.js"
 ]);
 
-enqueue(convert, [
+/*enqueue(convert, [
   "./test/async.js",
   "./test/async.es5.js"
-]);
+]);*/
 
 enqueue(makeMochaCopyFunction("mocha.js"));
 enqueue(makeMochaCopyFunction("mocha.css"));
@@ -119,7 +119,8 @@ if (!semver.eq(process.version, "0.11.7")) {
       ["./test/runtime.js",
        "./test/tests.es5.js",
        "./test/non-native.es5.js",
-       "./test/async.es5.js"],
+       //"./test/async.es5.js",
+      ],
       "./test/tests.browser.js"
     ]);
   } catch (ignored) {
@@ -132,13 +133,13 @@ enqueue("mocha", [
   "--require", "./test/runtime.js",
   "./test/tests.es5.js",
   "./test/non-native.es5.js",
-  "./test/async.es5.js",
+  //"./test/async.es5.js",
   "./test/tests.transform.js"
 ]);
 
 // Run command-line tool with available options to make sure it works.
 
-enqueue("./bin/regenerator", [
+/*enqueue("./bin/regenerator", [
   "./test/async.es5.js"
 ], true);
 
@@ -179,6 +180,6 @@ enqueue("./bin/regenerator", [
   "--include-runtime",
   "--disable-async",
   "./test/nothing-to-transform.js"
-], true);
+], true);*/
 
 flush();

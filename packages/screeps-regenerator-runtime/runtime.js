@@ -17,6 +17,7 @@
   var $Symbol = typeof Symbol === "function" ? Symbol : {};
   var iteratorSymbol = $Symbol.iterator || "@@iterator";
   var toStringTagSymbol = $Symbol.toStringTag || "@@toStringTag";
+  var generatorSymbol = "@@gen";
 
   var inModule = typeof module === "object";
   var runtime = global.regeneratorRuntime;
@@ -40,47 +41,36 @@
   // declared anywhere other than the toplevel scope.
   var allGenerators = {};
 
-  function wrapGenerator(innerFn, hash, argNames, argumentsVariable, tryLocsList) {
-    var genFun = function() {
-      var locals = Object.create(null);
-      for (var i = argNames.length - 1; i >= 0; i--) {
-        locals[argNames[i]] = arguments[i];
-      }
-      if (argumentsVariable) {
-        locals[argumentsVariable] = arguments;
-      }
-
-      var generator = Object.create(genFun.prototype);
-      generator._context = new Context(genFun._hash, locals, tryLocsList || []);
-
-      // The ._invoke method unifies the implementations of the .next,
-      // .throw, and .return methods.
-      generator._invoke = makeInvokeMethod(innerFn, this);
-
-      return generator;
-    };
-
-    if (Object.setPrototypeOf) {
-      Object.setPrototypeOf(genFun, GeneratorFunction.prototype);
-    } else {
-      genFun.__proto__ = GeneratorFunction.prototype;
-      if (!(toStringTagSymbol in genFun)) {
-        genFun[toStringTagSymbol] = "GeneratorFunction";
-      }
+  function wrap(innerFn, outerFn, argNames, argumentsVariable, self, argValues, tryLocsList) {
+    if (!outerFn[generatorSymbol]) {
+      throw new Error("Generator was not marked");
     }
-    genFun.prototype = Object.create(Generator.prototype);
-    genFun.prototype.constructor = genFun;
-    genFun._hash = hash;
-    genFun._innerFn = innerFn;
+    // If outerFn provided and outerFn.prototype is a Generator, then outerFn.prototype instanceof Generator.
+    var protoGenerator = outerFn && outerFn.prototype instanceof Generator ? outerFn : Generator;
+    var generator = Object.create(protoGenerator.prototype);
 
-    if (allGenerators[hash]) {
-      throw new Error("Internal Error - duplicate hash");
+    var locals = {};
+    if (argumentsVariable) {
+      locals[argumentsVariable] = Array.prototype.slice.call(argValues, 0);
+      Object.defineProperty(locals[argumentsVariable], 'callee', {
+        value: outerFn,
+        enumerable: false
+      });
     }
-    allGenerators[hash] = genFun;
+    argNames.forEach(function(name, i) {
+      locals[name] = argValues[i];
+    });
 
-    return genFun;
+    var context = new Context(outerFn, locals, tryLocsList || []);
+    generator._context = context;
+
+    // The ._invoke method unifies the implementations of the .next,
+    // .throw, and .return methods.
+    generator._invoke = makeInvokeMethod(innerFn, self, context);
+
+    return generator;
   }
-  runtime.wrapGenerator = wrapGenerator;
+  runtime.wrap = wrap;
 
   // Try/catch helper to minimize deoptimizations. Returns a completion
   // record like context.tryEntries[i].completion. This interface could
@@ -159,6 +149,20 @@
         // do is to check its .name property.
         (ctor.displayName || ctor.name) === "GeneratorFunction"
       : false;
+  };
+
+  runtime.mark = function(genFun, hash) {
+    if (Object.setPrototypeOf) {
+      Object.setPrototypeOf(genFun, GeneratorFunctionPrototype);
+    } else {
+      genFun.__proto__ = GeneratorFunctionPrototype;
+      if (!(toStringTagSymbol in genFun)) {
+        genFun[toStringTagSymbol] = "GeneratorFunction";
+      }
+    }
+    genFun.prototype = Object.create(Gp);
+    genFun[generatorSymbol] = hash;
+    return genFun;
   };
 
   // Within the body of any async function, `await x` is transformed to
@@ -256,7 +260,7 @@
   // the final result produced by the iterator.
   runtime.async = function(innerFn, outerFn, self, tryLocsList) {
     var iter = new AsyncIterator(
-      wrapGenerator(innerFn, outerFn, self, tryLocsList)
+      wrap(innerFn, outerFn, self, tryLocsList)
     );
 
     return runtime.isGeneratorFunction(outerFn)
@@ -436,8 +440,8 @@
     entry.completion = record;
   }
 
-  function Context(genHash, locals, tryLocsList) {
-    this.gen = genHash;
+  function Context(genFun, locals, tryLocsList) {
+    this.genFun = genFun;
     this.locals = locals;
     // The root entry object (effectively a try statement without a catch
     // or a finally block) gives us a place to store values thrown from
@@ -526,9 +530,6 @@
 
   Context.prototype = {
     constructor: Context,
-
-    reset: function() {
-    },
 
     stop: function() {
       this.done = true;
