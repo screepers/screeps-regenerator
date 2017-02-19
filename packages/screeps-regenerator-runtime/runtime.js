@@ -750,11 +750,7 @@
 
     deserializeReference: function(ref) {
       var pointer = ref[heapPointerSymbol];
-      if (typeof pointer !== 'number') {
-        // Some specific serializers will store immediate objects. These will
-        // get no special treatment.
-        return ref;
-      }
+      if (typeof pointer !== 'number') throw new Error("Invalid reference");
       var object = this.liveHeap[pointer];
       if (object) return object;
       var data = this.heap[pointer];
@@ -766,14 +762,18 @@
     serializeObject: function(object) {
       if (object instanceof Generator) {
         return this.serializeGenerator(object);
-      } else if (object instanceof Array) {
+      } else if (Array.isArray(object)) {
         return this.serializeArray(object);
-      } else if (Object.getPrototypeOf(object) === Object.prototype) {
+      } else if (Object.getPrototypeOf(object) === null || Object.getPrototypeOf(object).constructor.name === "Object") {
+        // Due to the nature of Screeps operating in multiple VM contexts, we
+        // can't compare Object.getPrototypeOf(object) === Object.prototype.
         var result = Object.assign({}, object);
         for (var k in result) {
           result[k] = this.serializeValue(result[k]);
         }
         return result;
+      } else {
+        throw new Error("Cannot serialize object with unknown constructor");
       }
     },
 
@@ -818,7 +818,7 @@
           n: ctx.delegate.nextLoc
         };
       }
-      result.locals = this.serializeObject(result.locals, true);
+      result.locals = this.serializeObject(result.locals);
       delete result.genHash;
       result[generatorSymbol] = ctx.genFun[generatorSymbol];
       return result;
@@ -835,6 +835,7 @@
           nextLoc: data.delegate.n,
         }
       }
+      data.locals = this.deserializeObject(data.locals);
       data.genFun = genFun;
       delete data[generatorSymbol];
       data = Object.assign(Object.create(Context.prototype), data);
