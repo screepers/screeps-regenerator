@@ -88,7 +88,7 @@ if (semver.gte(process.version, "0.11.2")) {
     "--harmony",
     "--reporter", "spec",
     "--require", "./test/runtime.js",
-    "./test/tests.es6.js",
+    "./test/tests.es6.js"
   ]);
 }
 
@@ -106,6 +106,11 @@ enqueue(convert, [
   "./test/async.js",
   "./test/async.es5.js"
 ]);*/
+
+enqueue(convert, [
+  "./test/tests.serialization.js",
+  "./test/tests.serialization.es5.js"
+]);
 
 enqueue(makeMochaCopyFunction("mocha.js"));
 enqueue(makeMochaCopyFunction("mocha.css"));
@@ -134,7 +139,8 @@ enqueue("mocha", [
   "./test/tests.es5.js",
   "./test/non-native.es5.js",
   //"./test/async.es5.js",
-  "./test/tests.transform.js"
+  "./test/tests.transform.js",
+  "./test/tests.serialization.es5.js",
 ]);
 
 // Run command-line tool with available options to make sure it works.

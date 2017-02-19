@@ -113,6 +113,7 @@ exports.visitor = {
           param.name = argsId.name;
         }
         params.elements.push(t.stringLiteral(param.name));
+        foundLocals.push(param.name);
       });
 
       let wrapArgs = [

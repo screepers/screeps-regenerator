@@ -17,6 +17,8 @@
   var $Symbol = typeof Symbol === "function" ? Symbol : {};
   var iteratorSymbol = $Symbol.iterator || "@@iterator";
   var toStringTagSymbol = $Symbol.toStringTag || "@@toStringTag";
+  var heapTagSymbol = "@@heapTag";
+  var heapPointerSymbol = "@@heapPtr";
   var generatorSymbol = "@@gen";
 
   var inModule = typeof module === "object";
@@ -66,7 +68,7 @@
 
     // The ._invoke method unifies the implementations of the .next,
     // .throw, and .return methods.
-    generator._invoke = makeInvokeMethod(innerFn, self, context);
+    generator._invoke = makeInvokeMethod(innerFn, self);
 
     return generator;
   }
@@ -162,6 +164,7 @@
     }
     genFun.prototype = Object.create(Gp);
     genFun[generatorSymbol] = hash;
+    allGenerators[hash] = genFun;
     return genFun;
   };
 
@@ -678,42 +681,178 @@
       this.delegate = {
         iterator: values(iterable),
         resultName: resultName,
-        nextLoc: nextLoc,
-        toJSON: function() {
-          return { i: this.iterator._context, r: this.resultName, n: this.nextLoc };
-        }
+        nextLoc: nextLoc
       };
 
       return ContinueSentinel;
+    }
+  };
+
+  function Marshal() {
+  }
+
+  Marshal.prototype = {
+    serialize: function(root) {
+      var version = 1;
+      this.heapCounter = 0;
+      this.liveHeap = {};
+      this.heap = {};
+      var root = this.serializeValue(root);
+      return [ version, root, this.heap ];
     },
 
-    revive: function(data) {
-      Object.assign(this, data);
-      if (this.delegate) {
-        let iterable = reviveContext(this.delegate.i);
-        this.delegateYield(iterable, this.delegate.r, this.delegate.n);
+    deserialize: function(data) {
+      var version = data[0];
+      if (version != 1) throw new Error("Invalid version");
+      this.liveHeap = {};
+      this.heap = data[2];
+      return this.deserializeValue(data[1]);
+    },
+
+    serializeValue: function(value) {
+      if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'string' || typeof value === 'undefined' || value === null) {
+        return value;
+      } else if (typeof value === 'object') {
+        return this.serializeReference(value);
+      } else {
+        throw new Error("Unable to serialize " + typeof value);
       }
     },
+
+    deserializeValue: function(value) {
+      if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'string' || typeof value === 'undefined' || value === null) {
+        return value;
+      } else if (typeof value === 'object') {
+        return this.deserializeReference(value);
+      } else {
+        throw new Error("Unable to deserialize " + typeof value);
+      }
+    },
+
+    serializeReference: function(object) {
+      if (object[heapTagSymbol]) {
+        if (this.liveHeap[object[heapTagSymbol]] !== object) {
+          throw new Error("Object has been serialized to another heap");
+        }
+      } else {
+        while (this.heap[this.heapCounter]) this.heapCounter += 1;
+        let pointer = this.heapCounter;
+        this.heapCounter += 1;
+        Object.defineProperty(object, heapTagSymbol, {
+          value: pointer,
+          enumerable: false
+        });
+        this.liveHeap[pointer] = object;
+        this.heap[pointer] = this.serializeObject(object);
+      }
+      return { [heapPointerSymbol]: object[heapTagSymbol] };
+    },
+
+    deserializeReference: function(ref) {
+      var pointer = ref[heapPointerSymbol];
+      if (typeof pointer !== 'number') {
+        // Some specific serializers will store immediate objects. These will
+        // get no special treatment.
+        return ref;
+      }
+      var object = this.liveHeap[pointer];
+      if (object) return object;
+      var data = this.heap[pointer];
+      delete this.heap[pointer];
+      if (!data) throw new Error("Invalid heap ref " + pointer);
+      return this.liveHeap[pointer] = this.deserializeObject(data);
+    },
+
+    serializeObject: function(object) {
+      if (object instanceof Generator) {
+        return this.serializeGenerator(object);
+      } else if (object instanceof Array) {
+        return this.serializeArray(object);
+      } else if (Object.getPrototypeOf(object) === Object.prototype) {
+        var result = Object.assign({}, object);
+        for (var k in result) {
+          result[k] = this.serializeValue(result[k]);
+        }
+        return result;
+      }
+    },
+
+    deserializeObject: function(data) {
+      if (data[generatorSymbol]) {
+        return this.deserializeGenerator(data);
+      } else if (data instanceof Array) {
+        return this.deserializeArray(data);
+      } else {
+        for (var k in data) {
+          data[k] = this.deserializeValue(data[k]);
+        }
+
+        // If there is a constructor, allocate that object
+        var prototype = Object.getPrototypeOf(data);
+        var object = Object.assign(Object.create(prototype), data);
+        return object;
+      }
+    },
+
+    serializeArray: function(arr) {
+      if (Object.getPrototypeOf(arr) !== Array.prototype) {
+        throw new Error("Cannot serialize subclass of Array");
+      }
+      return arr.map((v) => this.serializeValue(v));
+    },
+
+    deserializeArray: function(arr) {
+      return arr.map((v) => this.deserializeValue(v));
+    },
+
+    serializeGenerator: function(gen) {
+      if (Object.getPrototypeOf(Object.getPrototypeOf(gen)) !== Generator.prototype) {
+        throw new Error("Cannot serialize subclass of Generator");
+      }
+      var ctx = gen._context;
+      var result = Object.assign(Object.create(null), ctx);
+      if (ctx.delegate) {
+        result.delegate = {
+          i: this.serializeGenerator(ctx.delegate.iterator),
+          r: ctx.delegate.resultName,
+          n: ctx.delegate.nextLoc
+        };
+      }
+      result.locals = this.serializeObject(result.locals, true);
+      delete result.genHash;
+      result[generatorSymbol] = ctx.genFun[generatorSymbol];
+      return result;
+    },
+
+    deserializeGenerator: function(data) {
+      var genFun = allGenerators[data[generatorSymbol]];
+      if (!genFun) throw new Error("Bad generator hash");
+
+      if (data.delegate) {
+        data.delegate = {
+          iterator: values(this.deserializeObject(data.delegate.i)),
+          resultName: data.delegate.r,
+          nextLoc: data.delegate.n,
+        }
+      }
+      data.genFun = genFun;
+      delete data[generatorSymbol];
+      data = Object.assign(Object.create(Context.prototype), data);
+
+      var thisObject = null;
+      var generator = genFun.call(thisObject);
+      generator._context = data;
+
+      return generator;
+    }
   };
 
   runtime.serialize = function(gen) {
-    return JSON.stringify(gen._context);
+    return new Marshal().serialize(gen);
   };
 
-  function reviveContext(data) {
-    var genFun = allGenerators[data.gen];
-    if (!genFun) throw new Error("Bad generator hash");
-    var generator = Object.create(genFun.prototype);
-    generator._context = Object.assign(Object.create(Context.prototype));
-    generator._context.revive(data);
-    generator._invoke = makeInvokeMethod(genFun._innerFn, this);
-
-    return generator;
-  }
-
   runtime.deserialize = function(data) {
-    data = JSON.parse(data);
-    return reviveContext(data);
+    return new Marshal().deserialize(data);
   };
 })(
   // Among the various tricks for obtaining a reference to the global
