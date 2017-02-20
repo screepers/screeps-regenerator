@@ -699,27 +699,21 @@
     }
   };
 
-  function Marshal() {
+  var Marshal = runtime.Marshal = function Marshal(heap) {
+    if (!(this instanceof Marshal)) {
+      return new Marshal(heap);
+    }
+    this.heapCounter = 0;
+    this.heap = heap;
+    if (heap.version && heap.version != 1) {
+      throw new Error("Heap has invalid version");
+    }
+    heap.version = 1;
+
+    this.liveHeap = {};
   }
 
   Marshal.prototype = {
-    serialize: function(root) {
-      var version = 1;
-      this.heapCounter = 0;
-      this.liveHeap = {};
-      this.heap = {};
-      var root = this.serializeValue(root);
-      return [ version, root, this.heap ];
-    },
-
-    deserialize: function(data) {
-      var version = data[0];
-      if (version != 1) throw new Error("Invalid version");
-      this.liveHeap = {};
-      this.heap = data[2];
-      return this.deserializeValue(data[1]);
-    },
-
     serializeValue: function(value) {
       if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'string' || typeof value === 'undefined' || value === null) {
         return value;
@@ -741,22 +735,27 @@
     },
 
     serializeReference: function(object) {
-      if (object[heapTagSymbol]) {
-        if (this.liveHeap[object[heapTagSymbol]] !== object) {
+      let heapTag = object[heapTagSymbol];
+      if (heapTag) {
+        if (this.liveHeap[heapTag] !== object) {
           throw new Error("Object has been serialized to another heap");
         }
       } else {
-        while (this.heap[this.heapCounter]) this.heapCounter += 1;
-        let pointer = this.heapCounter;
+        while (this.liveHeap[this.heapCounter] || this.heap[this.heapCounter]) {
+          this.heapCounter += 1;
+        }
+        heapTag = this.heapCounter;
         this.heapCounter += 1;
         Object.defineProperty(object, heapTagSymbol, {
-          value: pointer,
+          value: heapTag,
           enumerable: false
         });
-        this.liveHeap[pointer] = object;
-        this.heap[pointer] = this.serializeObject(object);
+        this.liveHeap[heapTag] = object;
       }
-      return { [heapPointerSymbol]: object[heapTagSymbol] };
+      if (!this.heap[heapTag]) {
+        this.heap[heapTag] = this.serializeObject(object);
+      }
+      return { [heapPointerSymbol]: heapTag };
     },
 
     deserializeReference: function(ref) {
@@ -829,6 +828,7 @@
       } else if (data[constructorSymbol]) {
         var ctor = allConstructors[data[constructorSymbol]];
         if (!ctor) throw new Error("Invalid object constructor");
+        data = Object.assign({}, data);
         delete data[constructorSymbol];
         if (typeof ctor.deserialize === 'function') {
           return ctor.deserialize(data, this);
@@ -836,10 +836,11 @@
           return Object.assign(Object.create(ctor.prototype), data);
         }
       } else {
+        var result = {};
         for (var k in data) {
-          data[k] = this.deserializeValue(data[k]);
+          result[k] = this.deserializeValue(data[k]);
         }
-        return data;
+        return result;
       }
     },
 
@@ -875,33 +876,24 @@
       var genFun = allGenerators[data[generatorSymbol]];
       if (!genFun) throw new Error("Invalid generator hash");
 
-      if (data.delegate) {
-        data.delegate = {
-          iterator: values(this.deserializeObject(data.delegate.i)),
-          resultName: data.delegate.r,
-          nextLoc: data.delegate.n,
-        }
-      }
-      data.self = this.deserializeValue(data.self);
-      data.locals = this.deserializeObject(data.locals);
-      data.genFun = genFun;
-      delete data[generatorSymbol];
-      data = Object.assign(Object.create(Context.prototype), data);
-
       var thisObject = null;
       var generator = genFun.call(thisObject);
-      generator._context = data;
+      var ctx = generator._context = Object.assign(Object.create(Context.prototype), data);
+
+      if (ctx.delegate) {
+        ctx.delegate = {
+          iterator: values(this.deserializeObject(ctx.delegate.i)),
+          resultName: ctx.delegate.r,
+          nextLoc: ctx.delegate.n,
+        }
+      }
+      ctx.self = this.deserializeValue(ctx.self);
+      ctx.locals = this.deserializeObject(ctx.locals);
+      ctx.genFun = genFun;
+      delete ctx[generatorSymbol];
 
       return generator;
     }
-  };
-
-  runtime.serialize = function(gen) {
-    return new Marshal().serialize(gen);
-  };
-
-  runtime.deserialize = function(data) {
-    return new Marshal().deserialize(data);
   };
 
   if (typeof RoomObject !== 'undefined') {
