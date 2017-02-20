@@ -66,12 +66,12 @@
       locals[name] = argValues[i];
     });
 
-    var context = new Context(outerFn, locals, tryLocsList || []);
+    var context = new Context(outerFn, self === global ? null : self, locals, tryLocsList || []);
     generator._context = context;
 
     // The ._invoke method unifies the implementations of the .next,
     // .throw, and .return methods.
-    generator._invoke = makeInvokeMethod(innerFn, self);
+    generator._invoke = makeInvokeMethod(innerFn);
 
     return generator;
   }
@@ -283,7 +283,7 @@
         });
   };
 
-  function makeInvokeMethod(innerFn, self) {
+  function makeInvokeMethod(innerFn) {
     return function invoke(method, arg) {
       if (this._context.state === GenStateExecuting) {
         throw new Error("Generator is already running");
@@ -387,7 +387,7 @@
 
         this._context.state = GenStateExecuting;
 
-        var record = tryCatch(innerFn, self, this._context.locals, this._context);
+        var record = tryCatch(innerFn, this._context.self, this._context.locals, this._context);
         if (record.type === "normal") {
           // If an exception is thrown from innerFn, we leave state ===
           // GenStateExecuting and loop back for another invocation.
@@ -453,8 +453,9 @@
     entry.completion = record;
   }
 
-  function Context(genFun, locals, tryLocsList) {
+  function Context(genFun, self, locals, tryLocsList) {
     this.genFun = genFun;
+    this.self = self;
     this.locals = locals;
     // The root entry object (effectively a try statement without a catch
     // or a finally block) gives us a place to store values thrown from
@@ -863,6 +864,7 @@
           n: ctx.delegate.nextLoc
         };
       }
+      result.self = this.serializeValue(result.self);
       result.locals = this.serializeObject(result.locals);
       delete result.genHash;
       result[generatorSymbol] = ctx.genFun[generatorSymbol];
@@ -880,6 +882,7 @@
           nextLoc: data.delegate.n,
         }
       }
+      data.self = this.deserializeValue(data.self);
       data.locals = this.deserializeObject(data.locals);
       data.genFun = genFun;
       delete data[generatorSymbol];
@@ -910,12 +913,7 @@
           let id = target.serialize();
           throw new Error("Object is not available: " + id[constructorSymbol] + " " + id.id);
         }
-      },
-
-      getPrototypeOf: function(target) {
-        console.log("trap getPrototypeOf", this, target);
-        return Object.getPrototypeOf(target);
-      },
+      }
     };
 
     function createProxy(ctor, ctorName, id) {
