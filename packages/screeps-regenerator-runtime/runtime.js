@@ -20,6 +20,7 @@
   var heapTagSymbol = "@@heapTag";
   var heapPointerSymbol = "@@heapPtr";
   var generatorSymbol = "@@gen";
+  var constructorSymbol = "@@ctor";
 
   var inModule = typeof module === "object";
   var runtime = global.regeneratorRuntime;
@@ -42,6 +43,8 @@
   // the future. This is possible because we throw an error if generators are
   // declared anywhere other than the toplevel scope.
   var allGenerators = {};
+  // Keep a registry of serializable constructors as well.
+  var allConstructors = {};
 
   function wrap(innerFn, outerFn, argNames, argumentsVariable, self, argValues, tryLocsList) {
     if (!outerFn[generatorSymbol]) {
@@ -167,6 +170,13 @@
     allGenerators[hash] = genFun;
     return genFun;
   };
+
+  runtime.register = function(ctor, name) {
+    if (typeof allConstructors[name] !== 'undefined') {
+      throw new Error("Multiple constructors registered for " + name)
+    }
+    allConstructors[name] = ctor;
+  }
 
   // Within the body of any async function, `await x` is transformed to
   // `yield regeneratorRuntime.awrap(x)`, so that the runtime can test
@@ -764,40 +774,75 @@
         return this.serializeGenerator(object);
       } else if (Array.isArray(object)) {
         return this.serializeArray(object);
-      } else if (Object.getPrototypeOf(object) === null || Object.getPrototypeOf(object).constructor.name === "Object") {
-        // Due to the nature of Screeps operating in multiple VM contexts, we
-        // can't compare Object.getPrototypeOf(object) === Object.prototype.
-        var result = Object.assign({}, object);
-        for (var k in result) {
-          result[k] = this.serializeValue(result[k]);
-        }
         return result;
       } else {
-        throw new Error("Cannot serialize object with unknown constructor");
+        let constructor, serialized;
+        if (Object.getPrototypeOf(object) === null || Object.getPrototypeOf(object).constructor.name === "Object") {
+          // Due to the nature of Screeps operating in multiple VM contexts, we
+          // can't compare Object.getPrototypeOf(object) === Object.prototype.
+          // We don't need a constructor symbol in this case.
+
+        } else {
+          for (let k in allConstructors) {
+            if (object instanceof allConstructors[k]) {
+              constructor = k;
+              break;
+            }
+          }
+          if (!constructor) {
+            throw new Error("Object has an unregistered type");
+          }
+        }
+
+        if (typeof object.serialize === 'function') {
+          serialized = object.serialize(this);
+        } else {
+          serialized = {};
+          try {
+            for (var k in object) {
+              serialized[k] = this.serializeValue(object[k]);
+            }
+          } catch(err) {
+            if (constructor) {
+              throw new Error("Object requires custom serialization: " + err.message);
+            } else {
+              throw err;
+            }
+          }
+        }
+
+        // Constructor may be overridden, for example by the missing object
+        // serializer.
+        return Object.assign(
+          { [constructorSymbol]: constructor },
+          serialized
+        );
       }
     },
 
     deserializeObject: function(data) {
       if (data[generatorSymbol]) {
         return this.deserializeGenerator(data);
-      } else if (data instanceof Array) {
+      } else if (Array.isArray(data)) {
         return this.deserializeArray(data);
+      } else if (data[constructorSymbol]) {
+        var ctor = allConstructors[data[constructorSymbol]];
+        if (!ctor) throw new Error("Invalid object constructor");
+        delete data[constructorSymbol];
+        if (typeof ctor.deserialize === 'function') {
+          return ctor.deserialize(data, this);
+        } else {
+          return Object.assign(Object.create(ctor.prototype), data);
+        }
       } else {
         for (var k in data) {
           data[k] = this.deserializeValue(data[k]);
         }
-
-        // If there is a constructor, allocate that object
-        var prototype = Object.getPrototypeOf(data);
-        var object = Object.assign(Object.create(prototype), data);
-        return object;
+        return data;
       }
     },
 
     serializeArray: function(arr) {
-      if (Object.getPrototypeOf(arr) !== Array.prototype) {
-        throw new Error("Cannot serialize subclass of Array");
-      }
       return arr.map((v) => this.serializeValue(v));
     },
 
@@ -826,7 +871,7 @@
 
     deserializeGenerator: function(data) {
       var genFun = allGenerators[data[generatorSymbol]];
-      if (!genFun) throw new Error("Bad generator hash");
+      if (!genFun) throw new Error("Invalid generator hash");
 
       if (data.delegate) {
         data.delegate = {
@@ -855,6 +900,72 @@
   runtime.deserialize = function(data) {
     return new Marshal().deserialize(data);
   };
+
+  if (typeof RoomObject !== 'undefined') {
+    var missingObjectHandler = {
+      get: function(target, prop) {
+        if (prop in target) {
+          return target[prop];
+        } else {
+          let id = target.serialize();
+          throw new Error("Object is not available: " + id[constructorSymbol] + " " + id.id);
+        }
+      },
+
+      getPrototypeOf: function(target) {
+        console.log("trap getPrototypeOf", this, target);
+        return Object.getPrototypeOf(target);
+      },
+    };
+
+    function createProxy(ctor, ctorName, id) {
+      var target = Object.create(ctor.prototype);
+
+      target.isObjectAvailable = function() { return false; }
+      target.serialize = function(marshal) {
+        return { [constructorSymbol]: ctorName, id: id };
+      };
+
+      return new Proxy(target, missingObjectHandler);;
+    }
+
+    RoomObject.prototype.serialize = function(marshal) {
+      return { id: this.id };
+    };
+    RoomObject.prototype.isObjectAvailable = function() { return true; };
+    RoomObject.deserialize = function(data, marshal) {
+      let found = Game.getObjectById(data.id);
+      if (found) {
+        return found;
+      } else {
+        return createProxy(RoomObject, 'RoomObject', data.id);
+      }
+    };
+    runtime.register(RoomObject, '@o');
+
+    Room.prototype.serialize = function(marshal) {
+      return { name: this.name };
+    };
+    Room.prototype.isObjectAvailable = function() { return true; };
+    Room.deserialize = function(data, marshal) {
+      let found = Game.rooms[data.name];
+      if (found) {
+        return found;
+      } else {
+        return createProxy(Room, 'Room', data.name);
+      }
+    };
+    runtime.register(Room, '@r');
+
+    RoomPosition.prototype.serialize = function(marshal) {
+      return { pos: this.roomName + _.padLeft(this.x, 2, '0') + _.padLeft(this.y, 2, '0') };
+    };
+    RoomPosition.deserialize = function(data, marshal) {
+      let room = data.pos.slice(0, -4), x = data.pos.slice(-4, -2), y = data.pos.slice(-2);
+      return new RoomPosition(x, y, room);
+    };
+    runtime.register(RoomPosition, '@p');
+  }
 })(
   // Among the various tricks for obtaining a reference to the global
   // object, this seems to be the most reliable technique that does not
