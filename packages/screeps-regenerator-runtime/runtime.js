@@ -783,10 +783,10 @@
           // We don't need a constructor symbol in this case.
 
         } else {
+          // Find the most specific registered constructor to serialize as.
           for (let k in allConstructors) {
-            if (object instanceof allConstructors[k]) {
+            if (object instanceof allConstructors[k] && (!constructor || allConstructors[k].prototype instanceof allConstructors[constructor])) {
               constructor = k;
-              break;
             }
           }
           if (!constructor) {
@@ -825,22 +825,26 @@
         return this.deserializeGenerator(data);
       } else if (Array.isArray(data)) {
         return this.deserializeArray(data);
-      } else if (data[constructorSymbol]) {
-        var ctor = allConstructors[data[constructorSymbol]];
-        if (!ctor) throw new Error("Invalid object constructor");
-        data = Object.assign({}, data);
-        delete data[constructorSymbol];
+
+      } else {
+        var ctor = Object;
+        if (data[constructorSymbol]) {
+          ctor = allConstructors[data[constructorSymbol]];
+          if (!ctor) throw new Error("Invalid object constructor");
+          data = Object.assign({}, data);
+          delete data[constructorSymbol];
+        }
+
         if (typeof ctor.deserialize === 'function') {
           return ctor.deserialize(data, this);
+
         } else {
-          return Object.assign(Object.create(ctor.prototype), data);
+          var result = Object.create(ctor.prototype);
+          for (var k in data) {
+            result[k] = this.deserializeValue(data[k]);
+          }
+          return result;
         }
-      } else {
-        var result = {};
-        for (var k in data) {
-          result[k] = this.deserializeValue(data[k]);
-        }
-        return result;
       }
     },
 
