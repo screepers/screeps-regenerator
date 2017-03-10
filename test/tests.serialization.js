@@ -5,14 +5,20 @@ var n = types.namedTypes;
 var transform = require("..").transform;
 
 function reserialize(value) {
-  var data = JSON.stringify(regeneratorRuntime.serialize(value), null, 2);
-  return regeneratorRuntime.deserialize(JSON.parse(data));
+  var marshal = new regeneratorRuntime.Marshal({});
+  var data = JSON.stringify(marshal.serializeValue(value), null, 2);
+  return marshal.deserializeValue(JSON.parse(data));
 }
 
 describe("serialization", function() {
   it("should work for simple values", function() {
     let value = "this is a test";
     assert.strictEqual(value, reserialize(value));
+  });
+
+  it("should work for arrays", function() {
+    let value = [ 1, 2, 3, 4 ];
+    assert.deepEqual(value, reserialize(value));
   });
 
   it("should work for references", function() {
