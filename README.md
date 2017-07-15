@@ -10,56 +10,22 @@ This project is based on [regenerator](https://github.com/facebook/regenerator),
 Status
 ---
 
-This project is currently just a proof-of-concept. There is very little error
-checking and few convenience methods. Follow the project to see future
-development.
+Generators can be serialized and deserialized from plan JSON objects, which
+allows their running state to be stored in Memory. Note that an advanced heap
+serializer is needed for anything more than trivial examples, because JSON does
+not allow circular references.
 
-The following currently works. It will spawn a creep in one of your controlled rooms and have it run laps around the room.
+Here is a working example using nothing more than this package:
 
 ```js
+require('screeps-regenerator-runtime/runtime');
+
 function* main() {
-  let room = _.filter(Game.rooms, r => r.controller && r.controller.my)[0];
-  console.log("Using " + room.name + " as test room.");
-  let creep = room.find(FIND_MY_CREEPS)[0];
-  if (!creep) {
-    console.log(room.name + " has no creep; spawning.");
-    let spawn = room.find(FIND_MY_SPAWNS)[0];
-    if (!spawn) {
-      console.log(room.name + " has no spawn!");
-      return;
-    }
-    creep = yield* spawnCreep(spawn);
-  }
-  console.log("Toy creep is", creep.name);
+  let counter = 0;
   while (true) {
-    yield* moveCreep(creep, new RoomPosition(0, 0, room.name), { range: 15 });
-    console.log(creep.name + " is at the top left");
-    yield* moveCreep(creep, new RoomPosition(49, 0, room.name), { range: 15 });
-    console.log(creep.name + " is at the top right");
-    yield* moveCreep(creep, new RoomPosition(49, 49, room.name), { range: 15 });
-    console.log(creep.name + " is at the bottom left");
-    yield* moveCreep(creep, new RoomPosition(0, 49, room.name), { range: 15 });
-    console.log(creep.name + " is at the bottom right");
-  }
-}
-
-function* spawnCreep(spawn) {
-  let name = spawn.createCreep([MOVE]);
-  if (typeof name === 'number') {
-    throw new Error("Cannot spawn creep: Error " + name);
-  }
-  while (Game.creeps[name].spawning) {
+    console.log("Code has been running for", counter, "ticks");
     yield null;
-  }
-  return Game.creeps[name];
-}
-
-function* moveCreep(creep, target, opts) {
-  opts = opts || {};
-  let range = opts.range || 0;
-  while (creep.pos.getRangeTo(target) > range) {
-    creep.moveTo(target, opts);
-    yield null;
+    counter += 1;
   }
 }
 
@@ -67,7 +33,7 @@ exports.loop = function () {
   var thread;
   if (Memory.thread) {
     try {
-      thread = regeneratorRuntime.deserialize(Memory.thread);
+      thread = regeneratorRuntime.deserializeGenerator(Memory.thread);
     } finally {
       delete Memory.thread;
     }
@@ -76,10 +42,9 @@ exports.loop = function () {
   }
   let result = thread.next();
   if (!result.done) {
-    Memory.thread = regeneratorRuntime.serialize(thread);
+    Memory.thread = regeneratorRuntime.serializeGenerator(thread);
   }
 };
-
 ```
 
 Installation

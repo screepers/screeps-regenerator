@@ -43,8 +43,6 @@
   // the future. This is possible because we throw an error if generators are
   // declared anywhere other than the toplevel scope.
   var allGenerators = {};
-  // Keep a registry of serializable constructors as well.
-  var allConstructors = {};
 
   function wrap(innerFn, outerFn, argNames, argumentsVariable, self, argValues, tryLocsList) {
     if (!outerFn[generatorSymbol]) {
@@ -170,13 +168,6 @@
     allGenerators[hash] = genFun;
     return genFun;
   };
-
-  runtime.register = function(ctor, name) {
-    if (typeof allConstructors[name] !== 'undefined') {
-      throw new Error("Multiple constructors registered for " + name)
-    }
-    allConstructors[name] = ctor;
-  }
 
   // Within the body of any async function, `await x` is transformed to
   // `yield regeneratorRuntime.awrap(x)`, so that the runtime can test
@@ -699,267 +690,51 @@
     }
   };
 
-  var Marshal = runtime.Marshal = function Marshal(heap) {
-    if (!(this instanceof Marshal)) {
-      return new Marshal(heap);
+  runtime.serializeGenerator = function(gen) {
+    if (Object.getPrototypeOf(Object.getPrototypeOf(gen)) !== Generator.prototype) {
+      throw new Error("Cannot serialize subclass of Generator");
     }
-    this.heapCounter = 0;
-    this.heap = heap;
-    if (heap.version && heap.version != 1) {
-      throw new Error("Heap has invalid version");
+    var ctx = gen._context;
+    var result = Object.assign(Object.create(null), ctx);
+    if (ctx.delegate) {
+      result.delegate = {
+        i: ctx.delegate.iterator,
+        r: ctx.delegate.resultName,
+        n: ctx.delegate.nextLoc,
+      };
     }
-    heap.version = 1;
-
-    this.liveHeap = {};
-  }
-
-  Marshal.prototype = {
-    serializeValue: function(value) {
-      if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'string' || typeof value === 'undefined' || value === null) {
-        return value;
-      } else if (typeof value === 'object') {
-        return this.serializeReference(value);
-      } else {
-        throw new Error("Unable to serialize " + typeof value);
-      }
-    },
-
-    deserializeValue: function(value) {
-      if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'string' || typeof value === 'undefined' || value === null) {
-        return value;
-      } else if (typeof value === 'object') {
-        return this.deserializeReference(value);
-      } else {
-        throw new Error("Unable to deserialize " + typeof value);
-      }
-    },
-
-    serializeReference: function(object) {
-      let heapTag = object[heapTagSymbol];
-      if (heapTag) {
-        if (this.liveHeap[heapTag] !== object) {
-          throw new Error("Object has been serialized to another heap");
-        }
-      } else {
-        while (this.liveHeap[this.heapCounter] || this.heap[this.heapCounter]) {
-          this.heapCounter += 1;
-        }
-        heapTag = this.heapCounter;
-        this.heapCounter += 1;
-        Object.defineProperty(object, heapTagSymbol, {
-          value: heapTag,
-          enumerable: false
-        });
-        this.liveHeap[heapTag] = object;
-      }
-      if (!this.heap[heapTag]) {
-        this.heap[heapTag] = this.serializeObject(object);
-      }
-      return { [heapPointerSymbol]: heapTag };
-    },
-
-    deserializeReference: function(ref) {
-      var pointer = ref[heapPointerSymbol];
-      if (typeof pointer !== 'number') throw new Error("Invalid reference");
-      var object = this.liveHeap[pointer];
-      if (object) return object;
-      var data = this.heap[pointer];
-      delete this.heap[pointer];
-      if (!data) throw new Error("Invalid heap ref " + pointer);
-      return this.liveHeap[pointer] = this.deserializeObject(data);
-    },
-
-    serializeObject: function(object) {
-      if (object instanceof Generator) {
-        return this.serializeGenerator(object);
-      } else if (Array.isArray(object)) {
-        return this.serializeArray(object);
-        return result;
-      } else {
-        let constructor, serialized;
-        if (Object.getPrototypeOf(object) === null || Object.getPrototypeOf(object).constructor.name === "Object") {
-          // Due to the nature of Screeps operating in multiple VM contexts, we
-          // can't compare Object.getPrototypeOf(object) === Object.prototype.
-          // We don't need a constructor symbol in this case.
-
-        } else {
-          // Find the most specific registered constructor to serialize as.
-          for (let k in allConstructors) {
-            if (object instanceof allConstructors[k] && (!constructor || allConstructors[k].prototype instanceof allConstructors[constructor])) {
-              constructor = k;
-            }
-          }
-          if (!constructor) {
-            throw new Error("Object has an unregistered type");
-          }
-        }
-
-        if (typeof object.serialize === 'function') {
-          serialized = object.serialize(this);
-        } else {
-          serialized = {};
-          try {
-            for (var k in object) {
-              serialized[k] = this.serializeValue(object[k]);
-            }
-          } catch(err) {
-            if (constructor) {
-              throw new Error("Object requires custom serialization: " + err.message);
-            } else {
-              throw err;
-            }
-          }
-        }
-
-        // Constructor may be overridden, for example by the missing object
-        // serializer.
-        return Object.assign(
-          { [constructorSymbol]: constructor },
-          serialized
-        );
-      }
-    },
-
-    deserializeObject: function(data) {
-      if (data[generatorSymbol]) {
-        return this.deserializeGenerator(data);
-      } else if (Array.isArray(data)) {
-        return this.deserializeArray(data);
-
-      } else {
-        var ctor = Object;
-        if (data[constructorSymbol]) {
-          ctor = allConstructors[data[constructorSymbol]];
-          if (!ctor) throw new Error("Invalid object constructor");
-          data = Object.assign({}, data);
-          delete data[constructorSymbol];
-        }
-
-        if (typeof ctor.deserialize === 'function') {
-          return ctor.deserialize(data, this);
-
-        } else {
-          var result = Object.create(ctor.prototype);
-          for (var k in data) {
-            result[k] = this.deserializeValue(data[k]);
-          }
-          return result;
-        }
-      }
-    },
-
-    serializeArray: function(arr) {
-      return arr.map((v) => this.serializeValue(v));
-    },
-
-    deserializeArray: function(arr) {
-      return arr.map((v) => this.deserializeValue(v));
-    },
-
-    serializeGenerator: function(gen) {
-      if (Object.getPrototypeOf(Object.getPrototypeOf(gen)) !== Generator.prototype) {
-        throw new Error("Cannot serialize subclass of Generator");
-      }
-      var ctx = gen._context;
-      var result = Object.assign(Object.create(null), ctx);
-      if (ctx.delegate) {
-        result.delegate = {
-          i: this.serializeGenerator(ctx.delegate.iterator),
-          r: ctx.delegate.resultName,
-          n: ctx.delegate.nextLoc
-        };
-      }
-      result.self = this.serializeValue(result.self);
-      result.locals = this.serializeObject(result.locals);
-      delete result.genHash;
-      result[generatorSymbol] = ctx.genFun[generatorSymbol];
-      return result;
-    },
-
-    deserializeGenerator: function(data) {
-      var genFun = allGenerators[data[generatorSymbol]];
-      if (!genFun) throw new Error("Invalid generator hash");
-
-      var thisObject = null;
-      var generator = genFun.call(thisObject);
-      var ctx = generator._context = Object.assign(Object.create(Context.prototype), data);
-
-      if (ctx.delegate) {
-        ctx.delegate = {
-          iterator: values(this.deserializeObject(ctx.delegate.i)),
-          resultName: ctx.delegate.r,
-          nextLoc: ctx.delegate.n,
-        }
-      }
-      ctx.self = this.deserializeValue(ctx.self);
-      ctx.locals = this.deserializeObject(ctx.locals);
-      ctx.genFun = genFun;
-      delete ctx[generatorSymbol];
-
-      return generator;
-    }
+    result.self = result.self;
+    result.locals = result.locals;
+    delete result.genHash;
+    result[generatorSymbol] = ctx.genFun[generatorSymbol];
+    return result;
   };
 
-  if (typeof RoomObject !== 'undefined') {
-    var missingObjectHandler = {
-      get: function(target, prop) {
-        if (prop in target) {
-          return target[prop];
-        } else {
-          let id = target.serialize();
-          throw new Error("Object is not available: " + id[constructorSymbol] + " " + id.id);
-        }
-      }
-    };
+  runtime.deserializeGenerator = function(data) {
+    var genFun = allGenerators[data[generatorSymbol]];
+    if (!genFun) throw new Error("Invalid generator hash");
 
-    function createProxy(ctor, ctorName, id) {
-      var target = Object.create(ctor.prototype);
+    var thisObject = null;
+    var generator = genFun.call(thisObject);
+    var ctx = (generator._context = Object.assign(
+      Object.create(Context.prototype),
+      data
+    ));
 
-      target.isObjectAvailable = function() { return false; }
-      target.serialize = function(marshal) {
-        return { [constructorSymbol]: ctorName, id: id };
+    if (ctx.delegate) {
+      ctx.delegate = {
+        iterator: values(ctx.delegate.i),
+        resultName: ctx.delegate.r,
+        nextLoc: ctx.delegate.n,
       };
-
-      return new Proxy(target, missingObjectHandler);;
     }
+    ctx.self = ctx.self;
+    ctx.locals = ctx.locals;
+    ctx.genFun = genFun;
+    delete ctx[generatorSymbol];
 
-    RoomObject.prototype.serialize = function(marshal) {
-      return { id: this.id };
-    };
-    RoomObject.prototype.isObjectAvailable = function() { return true; };
-    RoomObject.deserialize = function(data, marshal) {
-      let found = Game.getObjectById(data.id);
-      if (found) {
-        return found;
-      } else {
-        return createProxy(RoomObject, 'RoomObject', data.id);
-      }
-    };
-    runtime.register(RoomObject, '@o');
-
-    Room.prototype.serialize = function(marshal) {
-      return { name: this.name };
-    };
-    Room.prototype.isObjectAvailable = function() { return true; };
-    Room.deserialize = function(data, marshal) {
-      let found = Game.rooms[data.name];
-      if (found) {
-        return found;
-      } else {
-        return createProxy(Room, 'Room', data.name);
-      }
-    };
-    runtime.register(Room, '@r');
-
-    RoomPosition.prototype.serialize = function(marshal) {
-      return { pos: this.roomName + _.padLeft(this.x, 2, '0') + _.padLeft(this.y, 2, '0') };
-    };
-    RoomPosition.deserialize = function(data, marshal) {
-      let room = data.pos.slice(0, -4), x = data.pos.slice(-4, -2), y = data.pos.slice(-2);
-      return new RoomPosition(x, y, room);
-    };
-    runtime.register(RoomPosition, '@p');
-  }
+    return generator;
+  };
 })(
   // Among the various tricks for obtaining a reference to the global
   // object, this seems to be the most reliable technique that does not
