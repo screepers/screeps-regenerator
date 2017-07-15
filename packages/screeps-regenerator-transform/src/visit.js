@@ -9,6 +9,8 @@
  */
 
 import assert from "assert";
+import generate from "babel-generator";
+import crypto from "crypto";
 import * as t from "babel-types";
 import { hoist } from "./hoist";
 import { locals } from "./locals";
@@ -16,6 +18,14 @@ import { Emitter } from "./emit";
 import * as util from "./util";
 
 let getMarkInfo = require("private").makeAccessor();
+
+const getNodeHash = (path) => {
+  const code = generate(path.node, {
+    minified: true,
+  }, path.getSource()).code;
+  const hash = crypto.createHash('md5').update(code).digest('hex');
+  return hash;
+};
 
 exports.visitor = {
   Function: {
@@ -94,8 +104,7 @@ exports.visitor = {
       let emitter = new Emitter(localsId, contextId);
       emitter.explode(path.get("body"));
 
-      // XXX - this should be an actual hash of the compiled function body
-      let hash = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER).toString(16);
+      let hash = getNodeHash(path.get("body"));
 
       let outerFnExpr = getOuterFnExpr(path, hash, state.opts.allowNestedDeclarations);
       // Note that getOuterFnExpr has the side-effect of ensuring that the

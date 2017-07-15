@@ -2,7 +2,7 @@
   "name": "screeps-regenerator-transform",
   "author": "Ryan Patterson <ry@cgamesplay.com>",
   "description": "Explode async and generator functions into a state machine.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "main": "lib/index.js",
   "keywords": [
     "regenerator",
@@ -27,6 +27,7 @@
     ]
   },
   "dependencies": {
+    "babel-generator": "^6.19.0",
     "babel-runtime": "^6.18.0",
     "babel-types": "^6.19.0",
     "private": "^0.1.6"
