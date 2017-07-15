@@ -2,7 +2,7 @@
   "name": "screeps-regenerator-preset",
   "author": "Ryan Patterson <ry@cgamesplay.com>",
   "description": "Babel preset for easy use of screeps-regenerator-transform.",
-  "version": "0.9.6",
+  "version": "1.0.0",
   "main": "index.js",
   "keywords": [
     "regenerator",
@@ -23,6 +23,6 @@
     "babel-plugin-transform-es2015-classes": "^6.18.0",
     "babel-plugin-transform-es2015-for-of": "^6.18.0",
     "babel-plugin-transform-es2015-destructuring": "^6.18.0",
-    "screeps-regenerator-transform": "^0.9.3"
+    "screeps-regenerator-transform": "^1.0.0"
   }
 }
