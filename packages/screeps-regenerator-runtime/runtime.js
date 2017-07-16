@@ -31,8 +31,12 @@
       module.exports = runtime;
     }
     // Don't bother evaluating the rest of this file if the runtime was
-    // already defined globally.
-    return;
+    // already defined globally. Note that the primary version of
+    // regenerator-runtime can be included, in which case we still want to
+    // overwrite with this version.
+    if (typeof runtime.serializeGenerator === 'function') {
+      return;
+    }
   }
 
   // Define the runtime globally (as expected by generated code) as either
